@@ -6,7 +6,6 @@ test_img_files = [f"data/thermal_images/thermal_{i}.png" for i in range(1, 500)]
 test_bounding_box = [250, 290, 260, 300]   # in a format of bb_x_min(top), bb_x_max(bottom), bb_y_min(left), bb_y_max(right)
 
 
-
 if __name__ == '__main__':
     image = cv2.imread(test_img_file, 0)
 
