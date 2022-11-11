@@ -1,41 +1,58 @@
 import pytesseract   # https://github.com/madmaze/pytesseract
 import cv2
 import numpy as np
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
 
 MAX_TEMP = 1000
 MIN_TEMP = 0
 INTENSITY_RANGE = [55, 255]   # this is the corresponding grey scale intensity range
+MAX_TEMP_LOCATION = [70, 100, 500, 600]
+MIN_TEMP_LOCATION = [390, 420, 500, 600]
 
-def read_ocr_output(output):
+def clean_ocr_output(outputs):
     nums = []
-    for line in output.splitlines():
+    for line in outputs.splitlines():
         clean_line = line.strip().split(".")[0].split(" ")[0]
         if clean_line.isdigit():
             nums.append(int(clean_line))
-    return sorted(nums) if min(nums) >= MIN_TEMP and max(nums) <= MAX_TEMP else []
+    if not nums:
+        return []
+    nums = sorted(nums) if min(nums) >= MIN_TEMP and max(nums) <= MAX_TEMP else []
+    return nums
 
 def get_temp_range_from_thermal(path_to_file):
     image = cv2.imread(path_to_file, 0)
-    outputs = pytesseract.image_to_string(image)
-    temp_range = read_ocr_output(outputs)
-    return temp_range
+    min_temp_read = pytesseract.image_to_string(image[MIN_TEMP_LOCATION[0]:MIN_TEMP_LOCATION[1], MIN_TEMP_LOCATION[2]:MIN_TEMP_LOCATION[3]])
+    max_temp_read = pytesseract.image_to_string(image[MAX_TEMP_LOCATION[0]:MAX_TEMP_LOCATION[1], MAX_TEMP_LOCATION[2]:MAX_TEMP_LOCATION[3]])
+    combined_output = min_temp_read + max_temp_read
+    outputs_without_crop = pytesseract.image_to_string(image)
+    cleaned_output_1 = clean_ocr_output(combined_output)
+    cleaned_output_2 = clean_ocr_output(outputs_without_crop)
+    return [min(cleaned_output_1+cleaned_output_2), max(cleaned_output_1+cleaned_output_2)]
 
-def calc_temps_in_bounding_box(img_file, bounding_box_range):
+def calc_temps_in_bounding_box(img_file, bounding_box_range, set_minimum_temp=25):
     bb_x_min, bb_x_max, bb_y_min, bb_y_max = bounding_box_range
     image = cv2.imread(img_file, 0)
     image_np = np.array(image)
     temp_scale = get_temp_range_from_thermal(img_file)
+    try:
+        slope = (temp_scale[1] - temp_scale[0]) / (INTENSITY_RANGE[1] - INTENSITY_RANGE[0])
+    except:
+        logging.info('An error when reading the temp scale')
+        return None
+
     
-    print(temp_scale)
     slope = (temp_scale[1] - temp_scale[0]) / (INTENSITY_RANGE[1] - INTENSITY_RANGE[0])
     intercept = temp_scale[1] - slope*INTENSITY_RANGE[1]
-    print(slope, intercept)
 
     pixel_intensity_in_bb = image_np[bb_x_min:bb_x_max, bb_y_min:bb_y_max].flatten()
-    print(np.min(pixel_intensity_in_bb))
-    min_intensity_bb = np.min(pixel_intensity_in_bb)*slope + intercept
-    max_intensity_bb = np.max(pixel_intensity_in_bb)*slope + intercept
-    avg_intensity_bb = np.mean(pixel_intensity_in_bb)*slope + intercept
-    return (min_intensity_bb, max_intensity_bb, avg_intensity_bb)
+    pixel_temp_in_bb = [int(intensity*slope) + intercept for intensity in pixel_intensity_in_bb]
+    pixel_temp_stepwise_in_bb = [max(set_minimum_temp, temp) for temp in pixel_temp_in_bb]
+    # print(pixel_temp_stepwise_in_bb)
+    return (round(np.min(pixel_temp_stepwise_in_bb), 2), 
+            round(np.max(pixel_temp_stepwise_in_bb), 2), 
+            round(np.mean(pixel_temp_stepwise_in_bb), 2))
 
 
